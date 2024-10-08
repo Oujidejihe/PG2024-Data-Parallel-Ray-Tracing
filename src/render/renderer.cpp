@@ -5,6 +5,7 @@
 #include <omp.h>
 #include <assert.h>
 #include <string>
+#include <set>
 
 #include "assert_macros.hpp"
 #include "core/ptex_texture.hpp"
@@ -74,6 +75,7 @@ struct ShadowBuffers
 
 
 struct BufferManager {
+
     size_t rayBufferSizeInBytes;
     size_t indexBufferSizeInBytes;
 
@@ -96,6 +98,7 @@ struct BufferManager {
     size_t shadowOcclusionFloatTypeBufferSizeInBytes;
     size_t contributionBufferSizeInBytes;
 
+    HostBuffers host;
     OutputBuffers output;
 };
 
@@ -306,6 +309,30 @@ static void copyOutputBuffersForColor(
 
 }
 
+// static void copyOutputBuffersForShadow(
+//     BufferManager &buffers,
+//     int width,
+//     int height,
+//     Params &params
+// ) {
+//     buffers.output.shadowOcclusionBuffer.resize(width * height * 1);
+//     buffers.output.shadowWeightBuffer.resize(width * height * 1);
+
+//     CHECK_CUDA(cudaMemcpy(
+//         reinterpret_cast<void *>(buffers.output.shadowOcclusionBuffer.data()),
+//         params.shadowOcclusionBuffer,
+//         buffers.shadowOcclusionBufferSizeInBytes,
+//         cudaMemcpyDeviceToHost
+//     ));
+
+//     CHECK_CUDA(cudaMemcpy(
+//         reinterpret_cast<void *>(buffers.output.shadowWeightBuffer.data()),
+//         params.shadowWeightBuffer,
+//         buffers.shadowWeightBufferSizeInBytes,
+//         cudaMemcpyDeviceToHost
+//     ));
+// }
+
 static void resetSampleBuffers(
     BufferManager &buffers,
     int width,
@@ -409,6 +436,12 @@ static void resetFrameBuffers(
         0,
         buffers.colorBufferSizeInBytes
     ));
+
+    // CHECK_CUDA(cudaMemset(
+    //     reinterpret_cast<void *>(params.shadowOcclusionCharTypeBuffer),
+    //     0,
+    //     buffers.shadowOcclusionCharTypeBufferSizeInBytes
+    // ));
 
     CHECK_CUDA(cudaMemset(
         reinterpret_cast<void *>(params.shadowOcclusionFloatTypeBuffer),
@@ -520,6 +553,18 @@ static void mallocBuffers(
     int handleSize,
     int worldSize
 ) {
+    // buffers.depthBufferSizeInBytes = width * height * sizeof(float);
+    // buffers.xiBufferSizeInBytes = width * height * 2 * sizeof(float);
+    // buffers.cosThetaWiBufferSizeInBytes = width * height * 1 * sizeof(float);
+    // buffers.sampleRecordInBufferSizeInBytes = width * height * sizeof(BSDFSampleRecord);
+    // buffers.sampleRecordOutBufferSizeInBytes = width * height * sizeof(BSDFSampleRecord);
+    // buffers.occlusionBufferSizeInBytes = width * height * 1 * sizeof(float);
+    // buffers.missDirectionBufferSizeInBytes = width * height * 3 * sizeof(float);
+    // buffers.barycentricBufferSizeInBytes = width * height * 2 * sizeof(float);
+    // buffers.idBufferSizeInBytes = width * height * sizeof(int) * 3;
+    // buffers.shadowOcclusionBufferSizeInBytes = width * height * sizeof(char) * 1;   //
+    // buffers.shadowWeightBufferSizeInBytes = width * height * sizeof(float) * 1;     //
+    // buffers.handleBufferSizeInBytes = sizeof(OptixTraversableHandle) * handleSize;
 
     buffers.rayBufferSizeInBytes = width * height * sizeof(Ray) * 1;
     buffers.indexBufferSizeInBytes = width * height * sizeof(int) * 1;
@@ -594,9 +639,9 @@ static void mallocBuffers(
         arena.pushTemp(buffers.colorBufferSizeInBytes)
     );
 
-    params.debugVisBuffer = reinterpret_cast<float *>( // TODO
-        arena.pushTemp(buffers.colorBufferSizeInBytes)
-    );
+    // params.debugVisBuffer = reinterpret_cast<float *>( // TODO
+    //     arena.pushTemp(buffers.colorBufferSizeInBytes)
+    // );
 
     params.scanResultNNBuffer = reinterpret_cast<int *>(
         arena.pushTemp(buffers.scanBufferNNSizeInBytes)
@@ -647,7 +692,7 @@ static void mallocBuffers(
         arena.pushTemp(sizeof(int) * blks2)
     );
 
-    arena.printMemoryStatus();
+    // arena.printMemoryStatus();
 }
 
 static void deferredMallocBuffers(
@@ -658,19 +703,24 @@ static void deferredMallocBuffers(
     int height,
     Params &params
 ) {
-    arena.printMemoryStatus();
+    // arena.printMemoryStatus();
 
+    #if TEX_MOANA
+    // int pixelSize = int(maxPathSize * 1.2 );
+    // pixelSize = (pixelSize + 1) / 2 * 2 - 1;
+    #else
     int pixelSize = width * height;
+    #endif
 
-    buffers.inputDataBufferSizeInBytes = sizeof(float) * pixelSize * 5 * params.maxCount * params.shadowPathCount;
+    buffers.inputDataBufferSizeInBytes = sizeof(NN_Float) * pixelSize * 5 * params.maxCount * params.shadowPathCount;
     buffers.NNPathDataBufferSizeInBytes = sizeof(NNPathData) * pixelSize * params.maxCount * params.shadowPathCount;
-    buffers.predBufferSizeInBytes = sizeof(float) * pixelSize * params.maxCount * params.shadowPathCount * 2 * 2;
+    buffers.predBufferSizeInBytes = sizeof(NN_Float) * pixelSize * params.maxCount * params.shadowPathCount * 2 * 2;
 
-    params.inputDataBuffer = reinterpret_cast<float *>(
+    params.inputDataBuffer = reinterpret_cast<NN_Float *>(
         arena.pushTemp(buffers.inputDataBufferSizeInBytes)
     );
 
-    params.packedInputDataBuffer = reinterpret_cast<float *>(
+    params.packedInputDataBuffer = reinterpret_cast<NN_Float *>(
         arena.pushTemp(buffers.inputDataBufferSizeInBytes)
     );//TAG
 
@@ -682,12 +732,36 @@ static void deferredMallocBuffers(
         arena.pushTemp(buffers.NNPathDataBufferSizeInBytes)
     );//TAG
 
-    params.predBuffer = reinterpret_cast<float *>(
+    params.predBuffer = reinterpret_cast<NN_Float *>(
         arena.pushTemp(buffers.predBufferSizeInBytes)
     );//TAG
 
 
     arena.printMemoryStatus();
+}
+
+static void castShadowRays(
+    int bounce,
+    std::map<PipelineType, OptixState> &optixStates,
+    CUstream stream,
+    int width,
+    int height,
+    Params &params,
+    CUdeviceptr d_params,
+    Timing &timing
+) {
+    CHECK_OPTIX(optixLaunch(
+        optixStates[PipelineType::ShadowRay].pipeline,
+        stream,
+        d_params,
+        sizeof(Params),
+        &optixStates[PipelineType::ShadowRay].sbt,
+        width,
+        height,
+        /*depth=*/1
+    ));
+
+    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 #if SEPARATEDNN
@@ -699,8 +773,8 @@ static void castShadowRaysDepthNN(
     int height,
     Params &params,
     Timing &timing,
-    std::vector<torch::jit::script::Module> modules,
-    std::vector<torch::jit::script::Module> depth_modules,
+    std::vector<torch::jit::script::Module> &modules,
+    std::vector<torch::jit::script::Module> &depth_modules,
     torch::Device device
 ) {
     std::vector<int> sceneOffsetCPU(params.sceneSize + 1);
@@ -724,36 +798,47 @@ static void castShadowRaysDepthNN(
         timing.start(TimedSection::NNTime);
 
         //Data Processing
-        auto options = torch::TensorOptions().dtype(torch::kFloat32).device(device);
-        const int startIndex = sceneOffsetCPU[hitAABBID - 1] * 5;
-        const int dataSize = sceneOffsetCPU[hitAABBID] - sceneOffsetCPU[hitAABBID - 1];
-        torch::Tensor dataGPU = torch::from_blob(params.packedInputDataBuffer + startIndex, {dataSize ,5}, options).clone();
+        auto options = torch::TensorOptions().dtype(torch::kFloat16).device(device);
+        int startIndex = sceneOffsetCPU[hitAABBID - 1];
 
-        inputs.push_back(dataGPU);
+        int dataSize = sceneOffsetCPU[hitAABBID] - sceneOffsetCPU[hitAABBID - 1];
 
-        //Forward
-        at::Tensor output = depth_modules[i].forward(inputs).toTensor();
+        while(dataSize > 0) {
+            int cur_size = dataSize > batchSize ? batchSize : dataSize;
 
-        // auto outputCPU = output.to(at::kCPU);
-        // std::cout << outputCPU << std::endl;
+            torch::Tensor dataGPU = torch::from_blob(params.packedInputDataBuffer + startIndex * 5, {cur_size, 5}, options);
 
-        cudaMemcpy(
-            reinterpret_cast<void *>(params.predBuffer + sceneOffsetCPU[hitAABBID - 1]),
-            output.data_ptr<float>(),
-            output.numel() * sizeof(float),
-            cudaMemcpyDeviceToDevice
-        );
+            // std::cout << "dataSize: " << cur_size << std::endl;
+            std::vector<torch::jit::IValue> inputs;
+            inputs.push_back(dataGPU);
+
+            //Forward
+            at::Tensor output = depth_modules[i].forward(inputs).toTensor();
+
+            // print_cuda_use();
+            // auto outputCPU = output.to(at::kCPU);
+            // std::cout << outputCPU << std::endl;
+
+            cudaMemcpy(
+                reinterpret_cast<void *>(params.predBuffer + startIndex),
+                output.data_ptr<at::Half>(),
+                output.numel() * sizeof(NN_Float),
+                cudaMemcpyDeviceToDevice
+            );
+
+            startIndex += cur_size;
+            dataSize -= cur_size;
+        }
 
         torch::cuda::synchronize();
         timing.end(TimedSection::NNTime);
         // std::cout << "NNTime: " << timing.getMilliseconds(TimedSection::NNTime) << std::endl;
     }
 
-    Depth_Buffer_Update(params, sceneOffsetCPU.back() + 1, width, height);
+    Depth_Buffer_Update(params, sceneOffsetCPU.back(), width, height);
 }
-#endif
 
-static void castShadowRaysNN(
+static void castSecondaryRaysNN(
     BufferManager &buffers,
     std::map<PipelineType, OptixState> &optixStates,
     CUstream stream,
@@ -761,8 +846,8 @@ static void castShadowRaysNN(
     int height,
     Params &params,
     Timing &timing,
-    std::vector<torch::jit::script::Module> modules,
-    std::vector<torch::jit::script::Module> depth_modules,
+    std::vector<torch::jit::script::Module> &modules,
+    std::vector<torch::jit::script::Module> &depth_modules,
     torch::Device device
 ) {
     std::vector<int> sceneOffsetCPU(params.sceneSize + 1);
@@ -772,13 +857,73 @@ static void castShadowRaysNN(
         buffers.sceneOffsetSizeInBytes,
         cudaMemcpyDeviceToHost
     ));
-    cudaMemcpy(sceneOffsetCPU.data(), params.sceneOffset, (params.sceneSize + 1) * sizeof(int), cudaMemcpyDeviceToHost);
 
     torch::NoGradGuard no_grad;
 
+    // warm up
+    //     for(int i = 0; i < params.sceneSize; i++) {
+    //     int hitAABBID = i + 1;
+    //     if(sceneOffsetCPU[hitAABBID] == sceneOffsetCPU[hitAABBID - 1]) continue;
+
+    //     std::vector<torch::jit::IValue> inputs;
+
+    //     //Data Processing
+    //     torch::Tensor dataGPU = torch::ones({1000000, 5}).to(device);
+    //     inputs.push_back(dataGPU);
+
+    //     //Forward
+    //     at::Tensor output = modules[i].forward(inputs).toTensor();
+
+    // }
     #if SEPARATEDNN
     for(int i = 0; i < vis_model_name.size(); i++) {
         if(vis_model_name[i].compare("padding") == 0) continue;
+        int hitAABBID = i + 1;
+        if(sceneOffsetCPU[hitAABBID] == sceneOffsetCPU[hitAABBID - 1]) continue;
+
+        timing.start(TimedSection::NNTime);
+
+        //Data Processing
+        auto options = torch::TensorOptions().dtype(torch::kFloat16).device(device);
+        int startIndex = sceneOffsetCPU[hitAABBID - 1];
+
+        int dataSize = sceneOffsetCPU[hitAABBID] - sceneOffsetCPU[hitAABBID - 1];
+
+        while(dataSize > 0) {
+            int cur_size = dataSize > batchSize ? batchSize : dataSize;
+
+            torch::Tensor dataGPU = torch::from_blob(params.packedInputDataBuffer + startIndex * 5, {cur_size, 5}, options);
+
+            // std::cout << "dataSize: " << cur_size << std::endl;
+            std::vector<torch::jit::IValue> inputs;
+            inputs.push_back(dataGPU);
+
+            //Forward
+            at::Tensor output = modules[i].forward(inputs).toTensor();
+
+            // print_cuda_use();
+            // auto outputCPU = output.to(at::kCPU);
+            // std::cout << outputCPU << std::endl;
+
+            cudaMemcpy(
+                reinterpret_cast<void *>(params.predBuffer + startIndex),
+                output.data_ptr<at::Half>(),
+                output.numel() * sizeof(NN_Float),
+                cudaMemcpyDeviceToDevice
+            );
+
+            startIndex += cur_size;
+            dataSize -= cur_size;
+        }
+
+        torch::cuda::synchronize();
+        timing.end(TimedSection::NNTime);
+        std::cout << "VisNNTime: " << timing.getMilliseconds(TimedSection::NNTime) << std::endl;
+    }
+
+    //=================
+    for(int i = 0; i < depth_model_name.size(); i++) {
+        if(depth_model_name[i].compare("padding") == 0) continue;
         int hitAABBID = i + 1;
         if(sceneOffsetCPU[hitAABBID] == sceneOffsetCPU[hitAABBID - 1]) continue;
 
@@ -787,7 +932,54 @@ static void castShadowRaysNN(
         timing.start(TimedSection::NNTime);
 
         //Data Processing
-        auto options = torch::TensorOptions().dtype(torch::kFloat32).device(device);
+        auto options = torch::TensorOptions().dtype(torch::kFloat16).device(device);
+        int startIndex = sceneOffsetCPU[hitAABBID - 1];
+
+        int dataSize = sceneOffsetCPU[hitAABBID] - sceneOffsetCPU[hitAABBID - 1];
+
+        while(dataSize > 0) {
+            int cur_size = dataSize > batchSize ? batchSize : dataSize;
+
+            torch::Tensor dataGPU = torch::from_blob(params.packedInputDataBuffer + startIndex * 5, {cur_size, 5}, options);
+
+            // std::cout << "dataSize: " << cur_size << std::endl;
+            std::vector<torch::jit::IValue> inputs;
+            inputs.push_back(dataGPU);
+
+            //Forward
+            at::Tensor output = depth_modules[i].forward(inputs).toTensor();
+
+            // print_cuda_use();
+            // auto outputCPU = output.to(at::kCPU);
+
+            cudaMemcpy(
+                reinterpret_cast<void *>(params.predBuffer + sceneOffsetCPU.back() + startIndex),
+                output.data_ptr<at::Half>(),
+                output.numel() * sizeof(NN_Float),
+                cudaMemcpyDeviceToDevice
+            );
+
+            startIndex += cur_size;
+            dataSize -= cur_size;
+        }
+
+        torch::cuda::synchronize();
+        timing.end(TimedSection::NNTime);
+        std::cout << "DepthNNTime: " << timing.getMilliseconds(TimedSection::NNTime) << std::endl;
+    }
+    //=================
+    #else
+    for(int i = 0; i < model_name.size(); i++) {
+        if(model_name[i].compare("padding") == 0) continue;
+        int hitAABBID = i + 1;
+        if(sceneOffsetCPU[hitAABBID] == sceneOffsetCPU[hitAABBID - 1]) continue;
+
+        std::vector<torch::jit::IValue> inputs;
+
+        timing.start(TimedSection::NNTime);
+
+        //Data Processing
+        auto options = torch::TensorOptions().dtype(torch::kFloat16).device(device);
         const int startIndex = sceneOffsetCPU[hitAABBID - 1] * 5;
         const int dataSize = sceneOffsetCPU[hitAABBID] - sceneOffsetCPU[hitAABBID - 1];
         torch::Tensor dataGPU = torch::from_blob(params.packedInputDataBuffer + startIndex, {dataSize ,5}, options).clone();
@@ -801,11 +993,124 @@ static void castShadowRaysNN(
         // std::cout << outputCPU << std::endl;
 
         cudaMemcpy(
-            reinterpret_cast<void *>(params.predBuffer + sceneOffsetCPU[hitAABBID - 1]),
-            output.data_ptr<float>(),
-            output.numel() * sizeof(float),
+            reinterpret_cast<void *>(params.predBuffer + 2 * sceneOffsetCPU[hitAABBID - 1]),
+            output.data_ptr<at::Half>(),
+            output.numel() * sizeof(NN_Float),
             cudaMemcpyDeviceToDevice
         );
+
+        torch::cuda::synchronize();
+        timing.end(TimedSection::NNTime);
+        // std::cout << "NNTime: " << timing.getMilliseconds(TimedSection::NNTime) << std::endl;
+    }
+    #endif
+
+    std::cout << "NN Ray:" << sceneOffsetCPU.back() << std::endl;
+
+    Target_Node_Update(params, sceneOffsetCPU.back(), width, height);
+}
+#endif
+
+static void castShadowRaysNN(
+    BufferManager &buffers,
+    std::map<PipelineType, OptixState> &optixStates,
+    CUstream stream,
+    int width,
+    int height,
+    Params &params,
+    Timing &timing,
+    std::vector<torch::jit::script::Module> &modules,
+    std::vector<torch::jit::script::Module> &depth_modules,
+    torch::Device device
+) {
+    std::vector<int> sceneOffsetCPU(params.sceneSize + 1);
+    CHECK_CUDA(cudaMemcpy(
+        reinterpret_cast<void *>(sceneOffsetCPU.data()),
+        params.sceneOffset,
+        buffers.sceneOffsetSizeInBytes,
+        cudaMemcpyDeviceToHost
+    ));
+    cudaMemcpy(sceneOffsetCPU.data(), params.sceneOffset, (params.sceneSize + 1) * sizeof(int), cudaMemcpyDeviceToHost);
+
+    torch::NoGradGuard no_grad;
+
+    // warm up
+    //     for(int i = 0; i < params.sceneSize; i++) {
+    //     int hitAABBID = i + 1;
+    //     if(sceneOffsetCPU[hitAABBID] == sceneOffsetCPU[hitAABBID - 1]) continue;
+
+    //     std::vector<torch::jit::IValue> inputs;
+
+    //     //Data Processing
+    //     torch::Tensor dataGPU = torch::ones({1000000, 5}).to(device);
+    //     inputs.push_back(dataGPU);
+
+    //     //Forward
+    //     at::Tensor output = modules[i].forward(inputs).toTensor();
+
+    // }
+    #if SEPARATEDNN
+    for(int i = 0; i < vis_model_name.size(); i++) {
+        if(vis_model_name[i].compare("padding") == 0) continue;
+        int hitAABBID = i + 1;
+        if(sceneOffsetCPU[hitAABBID] == sceneOffsetCPU[hitAABBID - 1]) continue;
+
+        timing.start(TimedSection::NNTime);
+
+        //Data Processing
+        auto options = torch::TensorOptions().dtype(torch::kFloat16).device(device);
+        int startIndex = sceneOffsetCPU[hitAABBID - 1];
+
+        int dataSize = sceneOffsetCPU[hitAABBID] - sceneOffsetCPU[hitAABBID - 1];
+
+        while(dataSize > 0) {
+            int cur_size = dataSize > batchSize ? batchSize : dataSize;
+
+            torch::Tensor dataGPU = torch::from_blob(params.packedInputDataBuffer + startIndex * 5, {cur_size, 5}, options);
+
+            // std::cout << "dataSize: " << cur_size << std::endl;
+            std::vector<torch::jit::IValue> inputs;
+            inputs.push_back(dataGPU);
+
+            //Forward
+            at::Tensor output = modules[i].forward(inputs).toTensor();
+
+            // print_cuda_use();
+            // auto outputCPU = output.to(at::kCPU);
+            // std::cout << outputCPU << std::endl;
+
+            cudaMemcpy(
+                reinterpret_cast<void *>(params.predBuffer + startIndex),
+                output.data_ptr<at::Half>(),
+                output.numel() * sizeof(NN_Float),
+                cudaMemcpyDeviceToDevice
+            );
+
+            startIndex += cur_size;
+            dataSize -= cur_size;
+        }
+
+
+        // torch::Tensor dataGPU = torch::from_blob(params.packedInputDataBuffer + startIndex, {dataSize ,5}, options);
+
+        // // std::cout << "dataSize: " << dataSize << std::endl;
+        // std::vector<torch::jit::IValue> inputs;
+        // inputs.push_back(dataGPU);
+
+        // //Forward
+        // at::Tensor output = modules[i].forward(inputs).toTensor();
+
+        // print_cuda_use();
+        // // auto outputCPU = output.to(at::kCPU);
+        // // std::cout << outputCPU << std::endl;
+
+        // cudaMemcpy(
+        //     reinterpret_cast<void *>(params.predBuffer + sceneOffsetCPU[hitAABBID - 1]),
+        //     output.data_ptr<float>(),
+        //     output.numel() * sizeof(float),
+        //     cudaMemcpyDeviceToDevice
+        // );
+
 
         torch::cuda::synchronize();
         timing.end(TimedSection::NNTime);
@@ -822,7 +1127,7 @@ static void castShadowRaysNN(
         timing.start(TimedSection::NNTime);
 
         //Data Processing
-        auto options = torch::TensorOptions().dtype(torch::kFloat32).device(device);
+        auto options = torch::TensorOptions().dtype(torch::kFloat16).device(device);
         const int startIndex = sceneOffsetCPU[hitAABBID - 1] * 5;
         const int dataSize = sceneOffsetCPU[hitAABBID] - sceneOffsetCPU[hitAABBID - 1];
         torch::Tensor dataGPU = torch::from_blob(params.packedInputDataBuffer + startIndex, {dataSize ,5}, options).clone();
@@ -837,8 +1142,8 @@ static void castShadowRaysNN(
 
         cudaMemcpy(
             reinterpret_cast<void *>(params.predBuffer + 2 * sceneOffsetCPU[hitAABBID - 1]),
-            output.data_ptr<float>(),
-            output.numel() * sizeof(float),
+            output.data_ptr<at::Half>(),
+            output.numel() * sizeof(NN_Float),
             cudaMemcpyDeviceToDevice
         );
 
@@ -848,7 +1153,302 @@ static void castShadowRaysNN(
     }
     #endif
 
-    Frame_Buffer_Update(params, sceneOffsetCPU.back() + 1, width, height);
+    std::cout << "NN Ray:" << sceneOffsetCPU.back() << std::endl;
+
+    Frame_Buffer_Update(params, sceneOffsetCPU.back(), width, height);
+}
+
+static void intersectWithScene(
+    int bounce,
+    std::map<PipelineType, OptixState> &optixStates,
+    CUstream stream,
+    int width,
+    int height,
+    Params &params,
+    CUdeviceptr d_params,
+    Timing &timing,
+    int &frame
+) {
+
+    params.startObj = 0;
+    params.offset = 0;
+
+    params.frame = frame;
+    params.bounce = bounce;
+    params.isRayTracing = true;
+    params.isAABBIntesction = false;
+
+    CHECK_CUDA(cudaMemcpy(
+        reinterpret_cast<void *>(d_params),
+        &params,
+        sizeof(Params),
+        cudaMemcpyHostToDevice
+    ));
+
+    CHECK_OPTIX(optixLaunch(
+        optixStates[PipelineType::MainRay].pipeline,
+        stream,
+        d_params,
+        sizeof(Params),
+        &optixStates[PipelineType::MainRay].sbt,
+        width,
+        height,
+        /*depth=*/1
+    ));
+
+    CHECK_CUDA(cudaDeviceSynchronize());
+}
+
+void coutTime(
+    double start,
+    double finish,
+    std::string name,
+    char mode
+) {
+
+    std::cout << name << ":\t" << finish - start << std::endl;
+}
+
+static void primaryRayModule(
+    std::map<PipelineType, OptixState> &optixStates,
+    BufferManager &buffers,
+    CUstream stream,
+    const int &width,
+    const int &height,
+    int &optix_width,
+    int &optix_height,
+    int &count,
+    const int &bounce,
+    Params &params,
+    CUdeviceptr d_params,
+    Timing &timing,
+    int &myid,
+    int &comm_size,
+    MpiBuffers &mpiBuffer,
+    MPI_Comm &comm_world
+) {
+    while(true) {
+
+        CHECK_OPTIX(optixLaunch(
+            optixStates[PipelineType::TraRay].pipeline,
+            stream,
+            d_params,
+            sizeof(Params),
+            &optixStates[PipelineType::TraRay].sbt,
+            optix_width,
+            optix_height,
+            /*depth=*/1
+        ));
+
+        CHECK_CUDA(cudaDeviceSynchronize());
+
+        timing.start(TimedSection::Experiment_0);
+
+        resetScanBuffers(buffers, width, height, params);
+
+        Work_Efficient_Scan(params, width, height, comm_size);
+
+        timing.end(TimedSection::Experiment_0);
+        // std::cout << myid << "Work_Efficient_Scan: " << timing.getMilliseconds(TimedSection::Experiment_0) << std::endl;
+
+        copyOutputBuffers(buffers, width, height, params, comm_size);
+
+        std::vector<int> sendCount(comm_size);
+        std::vector<int> recvCount(comm_size);
+        std::vector<int> recvOffset(comm_size + 1, 0);
+
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        timing.start(TimedSection::Experiment_1);
+
+        for (int i = 0; i < comm_size; i++) {
+            // std::cout << myid << "transferOffset[i]: " << buffers.output.transferOffset[i] << std::endl;
+            // std::cout << myid << "transferOffset[i + 1]: " << buffers.output.transferOffset[i + 1] << std::endl;
+            buffers.output.transferOffset[i + 1] *= sizeof(WavefrontPathData);
+            sendCount[i] = buffers.output.transferOffset[i + 1] - buffers.output.transferOffset[i];
+            if(i != myid) std::cout << myid << " To " << i << " sendCount: " << sendCount[i] / sizeof(WavefrontPathData) << std::endl;
+        }
+
+        MPI_Alltoall(sendCount.data(), 1, MPI_INT, recvCount.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+        for (int i = 0; i < comm_size; i++) {
+            recvOffset[i + 1] = recvOffset[i] + recvCount[i];
+            // std::cout << myid << "recvCount: " << recvCount[i] / sizeof(WavefrontPathData) << std::endl;
+        }
+
+        resetBounceBuffers(buffers, width, height, params);//pathBuffer置为0
+        MPI_Alltoallv(buffers.output.transferPathDataBuffer.data(), sendCount.data(), buffers.output.transferOffset.data(), MPI_BYTE, buffers.output.pathDataBuffer.data(), recvCount.data(), recvOffset.data(), MPI_BYTE, MPI_COMM_WORLD);
+
+        timing.end(TimedSection::Experiment_1);
+        std::cout << myid << "Transfer: " << timing.getMilliseconds(TimedSection::Experiment_1) << std::endl;
+
+        CHECK_CUDA(cudaMemcpy(
+            reinterpret_cast<void *>(params.pathDataBuffer),
+            buffers.output.pathDataBuffer.data(),
+            recvOffset.back(),
+            cudaMemcpyHostToDevice
+        ));
+
+        int breakForNode = buffers.output.transferOffset.back() == sendCount[myid] && recvOffset.back() == sendCount[myid];
+        int breakForWorld;
+        MPI_Allreduce(&breakForNode, &breakForWorld, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+        if (breakForWorld) {
+            params.pathSize = recvOffset.back() / sizeof(WavefrontPathData);
+            break;
+        }
+        // if (buffers.output.transferOffset.back() == sendCount[myid] && recvOffset.back() == sendCount[myid]) {
+        //     params.pathSize = recvOffset.back() / sizeof(WavefrontPathData);
+        //     break;
+        // }ssh moana@192.168.0.212
+
+        params.pathSize = recvOffset.back() / sizeof(WavefrontPathData);
+        // std::cout << "pathSize: " << params.pathSize << std::endl;
+        CHECK_CUDA(cudaMemcpy(
+            reinterpret_cast<void *>(d_params),
+            &params,
+            sizeof(Params),
+            cudaMemcpyHostToDevice
+        ));
+
+        optix_height = (params.pathSize + optix_width) / optix_width;
+        count++;
+    }
+
+    std::cout << "shading pathSize: " << params.pathSize << std::endl;
+}
+
+static void generateSecondaryAndShadowRay(
+    std::map<PipelineType, OptixState> &optixStates,
+    CUstream stream,
+    int &optix_width,
+    int &optix_height,
+    Params &params,
+    CUdeviceptr d_params
+) {
+    params.shadowPathSize = params.shadowPathCount * params.pathSize;
+    CHECK_CUDA(cudaMemcpy(
+        reinterpret_cast<void *>(d_params),
+        &params,
+        sizeof(Params),
+        cudaMemcpyHostToDevice
+    ));
+
+    //阴影光线和次级光线生成
+    CHECK_OPTIX(optixLaunch(
+        optixStates[PipelineType::MainRay].pipeline,
+        stream,
+        d_params,
+        sizeof(Params),
+        &optixStates[PipelineType::MainRay].sbt,
+        optix_width,
+        optix_height,
+        /*depth=*/1
+    ));
+}
+
+static void shadowRayModuleBasedNN(
+    std::map<PipelineType, OptixState> &optixStates,
+    BufferManager &buffers,
+    CUstream stream,
+    const int &width,
+    const int &height,
+    int &optix_width,
+    int &optix_height,
+    Params &params,
+    CUdeviceptr d_params,
+    Timing &timing,
+    std::vector<torch::jit::script::Module> &modules,
+    std::vector<torch::jit::script::Module> &depth_modules,
+    torch::Device device
+) {
+    timing.start(TimedSection::MPI_Function_1);
+    //阴影光线求交
+    CHECK_OPTIX(optixLaunch(
+        optixStates[PipelineType::ShadowRay].pipeline,
+        stream,
+        d_params,
+        sizeof(Params),
+        &optixStates[PipelineType::ShadowRay].sbt,
+        optix_width,
+        optix_height * params.shadowPathCount,
+        /*depth=*/1
+    ));
+
+    // std::vector<int> outData(params.maxCount * params.pathSize);
+    // std::vector<int> inData(params.maxCount * params.pathSize);
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    #if SEPARATEDNN
+    timing.start(TimedSection::Experiment_2);
+    resetScanNNBuffers(buffers, width, height, params);
+
+    Work_Efficient_Scan_For_NN_HIT_INSIDE(params, width, height);
+
+    castShadowRaysDepthNN(buffers, optixStates, stream, width, height, params, timing, modules, depth_modules, device);
+    timing.end(TimedSection::Experiment_2);
+
+    std::cout << "Depth TIME: " << timing.getMilliseconds(TimedSection::Experiment_2) << std::endl;
+    #endif
+
+    resetScanNNBuffers(buffers, width, height, params);
+    // Hillis_Steele_Scan_for_NN(params, width, height);
+    // scan_CPU_for_NN(params, width, height, outData, inData);
+    Work_Efficient_Scan_For_NN(params, width, height, params.maxCount * params.shadowPathSize);
+
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    //基于神经几何的阴影计算
+    castShadowRaysNN(buffers, optixStates, stream, width, height, params, timing, modules, depth_modules, device);
+
+    timing.end(TimedSection::MPI_Function_1);
+    std::cout << "NN VIS TIME: " << timing.getMilliseconds(TimedSection::MPI_Function_1) << std::endl;
+}
+
+static void secondaryRayModuleBasedNN(
+    std::map<PipelineType, OptixState> &optixStates,
+    BufferManager &buffers,
+    CUstream stream,
+    const int &width,
+    const int &height,
+    int &optix_width,
+    int &optix_height,
+    const int &bounce,
+    Params &params,
+    CUdeviceptr d_params,
+    Timing &timing,
+    std::vector<torch::jit::script::Module> &modules,
+    std::vector<torch::jit::script::Module> &depth_modules,
+    torch::Device device
+) {
+    timing.start(TimedSection::Experiment_3);
+
+    //次级光线求交
+    CHECK_OPTIX(optixLaunch(
+        optixStates[PipelineType::SecondaryRay].pipeline,
+        stream,
+        d_params,
+        sizeof(Params),
+        &optixStates[PipelineType::SecondaryRay].sbt,
+        optix_width,
+        optix_height,
+        /*depth=*/1
+    ));
+
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    #if SEPARATEDNN
+    timing.start(TimedSection::Experiment_2);
+
+    resetScanNNBuffers(buffers, width, height, params);
+
+    Work_Efficient_Scan_For_NN(params, width, height, params.maxCount * params.pathSize);
+
+    castSecondaryRaysNN(buffers, optixStates, stream, width, height, params, timing, modules, depth_modules, device);
+
+    timing.end(TimedSection::Experiment_2);
+
+    std::cout << "Secondary Ray Time: " << timing.getMilliseconds(TimedSection::Experiment_2) << std::endl;
+    #endif
 }
 
 //===========================================================
@@ -929,8 +1529,9 @@ static void runSample(
     // Path Trace
     for (int bounce = 0; bounce <= bounces ; bounce++) {
 
-        resetNNBuffers(buffers, width, height, params);
         params.bounce = bounce;
+
+        if(frame == 0 && sample == 0 && bounce == 0) deferredMallocBuffers(params.pathSize, buffers, sceneState.arena, width, height, params);
 
         CHECK_CUDA(cudaMemcpy(
             reinterpret_cast<void *>(d_params),
@@ -940,150 +1541,22 @@ static void runSample(
         ));
 
         int count = 0;
-        while(true) {
 
-            CHECK_OPTIX(optixLaunch(
-                optixStates[PipelineType::TraRay].pipeline,
-                stream,
-                d_params,
-                sizeof(Params),
-                &optixStates[PipelineType::TraRay].sbt,
-                optix_width,
-                optix_height,
-                /*depth=*/1
-            ));
-
-            CHECK_CUDA(cudaDeviceSynchronize());
-
-            timing.start(TimedSection::Experiment_0);
-
-            resetScanBuffers(buffers, width, height, params);
-
-            Work_Efficient_Scan(params, width, height, comm_size);
-
-            timing.end(TimedSection::Experiment_0);
-            // std::cout << myid << "Work_Efficient_Scan: " << timing.getMilliseconds(TimedSection::Experiment_0) << std::endl;
-
-            copyOutputBuffers(buffers, width, height, params, comm_size);
-
-            std::vector<int> sendCount(comm_size);
-            std::vector<int> recvCount(comm_size);
-            std::vector<int> recvOffset(comm_size + 1, 0);
-
-
-            MPI_Barrier(MPI_COMM_WORLD);
-            timing.start(TimedSection::Experiment_1);
-
-
-            for (int i = 0; i < comm_size; i++) {
-                // std::cout << myid << "transferOffset[i]: " << buffers.output.transferOffset[i] << std::endl;
-                // std::cout << myid << "transferOffset[i + 1]: " << buffers.output.transferOffset[i + 1] << std::endl;
-                buffers.output.transferOffset[i + 1] *= sizeof(WavefrontPathData);
-                sendCount[i] = buffers.output.transferOffset[i + 1] - buffers.output.transferOffset[i];
-                if(i != myid) std::cout << myid << " To " << i << " sendCount: " << sendCount[i] / sizeof(WavefrontPathData) << std::endl;
-            }
-
-            MPI_Alltoall(sendCount.data(), 1, MPI_INT, recvCount.data(), 1, MPI_INT, MPI_COMM_WORLD);
-
-            for (int i = 0; i < comm_size; i++) {
-                recvOffset[i + 1] = recvOffset[i] + recvCount[i];
-                // std::cout << myid << "recvCount: " << recvCount[i] / sizeof(WavefrontPathData) << std::endl;
-            }
-
-            resetBounceBuffers(buffers, width, height, params);//pathBuffer置为0
-            MPI_Alltoallv(buffers.output.transferPathDataBuffer.data(), sendCount.data(), buffers.output.transferOffset.data(), MPI_BYTE, buffers.output.pathDataBuffer.data(), recvCount.data(), recvOffset.data(), MPI_BYTE, MPI_COMM_WORLD);
-
-            timing.end(TimedSection::Experiment_1);
-            std::cout << myid << "Transfer: " << timing.getMilliseconds(TimedSection::Experiment_1) << std::endl;
-
-            CHECK_CUDA(cudaMemcpy(
-                reinterpret_cast<void *>(params.pathDataBuffer),
-                buffers.output.pathDataBuffer.data(),
-                recvOffset.back(),
-                cudaMemcpyHostToDevice
-            ));
-
-            if (buffers.output.transferOffset.back() == sendCount[myid] && recvOffset.back() == sendCount[myid]) {
-                params.pathSize = recvOffset.back() / sizeof(WavefrontPathData);
-                break;
-            }
-            params.pathSize = recvOffset.back() / sizeof(WavefrontPathData);
-            // std::cout << "pathSize: " << params.pathSize << std::endl;
-            CHECK_CUDA(cudaMemcpy(
-                reinterpret_cast<void *>(d_params),
-                &params,
-                sizeof(Params),
-                cudaMemcpyHostToDevice
-            ));
-
-            optix_height = (params.pathSize + optix_width - 1) / optix_width;
-            count++;
+        // Secondary Ray Traversal
+        if(bounce > 0) {
+            resetNNBuffers(buffers, width, height, params);
+            secondaryRayModuleBasedNN(optixStates, buffers, stream, width, height, optix_width, optix_height, bounce, params, d_params, timing, modules, depth_modules, device);
         }
 
-        std::cout << "shading pathSize: " << params.pathSize << std::endl;
+        // Primary Ray Traversal
+        primaryRayModule(optixStates, buffers, stream, width, height, optix_width, optix_height, count, bounce, params, d_params, timing, myid, comm_size, mpiBuffer, comm_world);
 
-        if(frame == 0 && sample == 0 && bounce == 0) deferredMallocBuffers(params.pathSize, buffers, sceneState.arena, width, height, params);
+        //Shadow & Secondary Ray Generation
+        generateSecondaryAndShadowRay(optixStates, stream, optix_width, optix_height, params, d_params);
 
-        params.shadowPathSize = params.shadowPathCount * params.pathSize;
-        CHECK_CUDA(cudaMemcpy(
-            reinterpret_cast<void *>(d_params),
-            &params,
-            sizeof(Params),
-            cudaMemcpyHostToDevice
-        ));
-
-        CHECK_OPTIX(optixLaunch(
-            optixStates[PipelineType::MainRay].pipeline,
-            stream,
-            d_params,
-            sizeof(Params),
-            &optixStates[PipelineType::MainRay].sbt,
-            optix_width,
-            optix_height,
-            /*depth=*/1
-        ));
-
-        timing.start(TimedSection::MPI_Function_1);
-
-        CHECK_OPTIX(optixLaunch(
-            optixStates[PipelineType::ShadowRay].pipeline,
-            stream,
-            d_params,
-            sizeof(Params),
-            &optixStates[PipelineType::ShadowRay].sbt,
-            optix_width,
-            optix_height * params.shadowPathCount,
-            /*depth=*/1
-        ));
-
-
-        CHECK_CUDA(cudaDeviceSynchronize());
-
-        #if SEPARATEDNN
-        timing.start(TimedSection::Experiment_2);
-        resetScanNNBuffers(buffers, width, height, params);
-
-        Work_Efficient_Scan_For_NN_HIT_INSIDE(params, width, height);
-
-        castShadowRaysDepthNN(buffers, optixStates, stream, width, height, params, timing, modules, depth_modules, device);
-        timing.end(TimedSection::Experiment_2);
-
-        std::cout << "Depth TIME: " << timing.getMilliseconds(TimedSection::Experiment_2) << std::endl;
-        #endif
-
-        resetScanNNBuffers(buffers, width, height, params);
-
-        Work_Efficient_Scan_For_NN(params, width, height);
-
-        CHECK_CUDA(cudaDeviceSynchronize());
-
-
-
-        castShadowRaysNN(buffers, optixStates, stream, width, height, params, timing, modules, depth_modules, device);
-
-        timing.end(TimedSection::MPI_Function_1);
-
-        std::cout << "NN VIS TIME: " << timing.getMilliseconds(TimedSection::MPI_Function_1) << std::endl;
+        // Shadow Ray Traversal
+        resetNNBuffers(buffers, width, height, params);
+        shadowRayModuleBasedNN(optixStates, buffers, stream, width, height, optix_width, optix_height, params, d_params, timing, modules, depth_modules, device);
 
         optix_height = (params.pathSize + optix_width) / optix_width;
         assert(params.pathSize <= width * height * 2);
@@ -1099,8 +1572,6 @@ static void runSample(
     timing.end(TimedSection::Sample);
     //time_static.close();
 }
-
-
 
 void launch(
     RenderRequest renderRequest,
@@ -1146,8 +1617,21 @@ void launch(
     }
     #else
     // sceneState.arena.printMemoryStatus();
+
     std::vector<cudaTextureObject_t> texObjs;
+    std::set<int> unique_texture_indexs;
+    int cur_texture_index = 0;
+    for(auto& geometry : sceneState.geometries) {
+        if(!geometry.isProxy) {
+            for(auto& record : geometry.hostSBTRecords)
+                unique_texture_indexs.insert(record.textureIndex);
+        }
+    }
+
+    #if TEX_MOANA
+    #else
     stbi_set_flip_vertically_on_load(1);
+    #endif
     for (const auto &filename : Textures::textureFilenames) {
         int width, height, component;
         #if TEX_MOANA
@@ -1155,11 +1639,15 @@ void launch(
         #else
         std::string load_filepath = filename;
         #endif
+        if(unique_texture_indexs.count(cur_texture_index++) == 0) {
+            texObjs.push_back(0);
+            continue;
+        }
         auto picture = stbi_loadf(load_filepath.c_str(), &width, &height, &component, 4);
 
         if (!picture) {
             // throw std::runtime_error("can not Load " + filename);
-            std::cout << "can not Load " + filename << std::endl;
+            // std::cout << "can not Load " + filename << std::endl;
             texObjs.push_back(0);
             continue;
         }
@@ -1230,7 +1718,7 @@ void launch(
         cudaMemcpyHostToDevice
     ));
     params.albedoTextures = d_texObjs;
-    // sceneState.arena.printMemoryStatus();
+    sceneState.arena.printMemoryStatus();
 
     #endif
 
@@ -1373,6 +1861,12 @@ void launch(
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
     // stride = worldSize / 2;
 
+    // assert(worldSize % 2 == 0);
+
+    // MPI_Comm_rank(comm_world, &myid);
+    // MPI_Get_processor_name(node_name, &name_len);
+    std::cout << "Process " << myid << " of " << node_name <<  " is working." << std::endl;
+
      #if SEPARATEDNN
     //======================================
     //Init
@@ -1442,80 +1936,135 @@ void launch(
     Camera camera = scene.getCamera(width, height);
 
     for(int cframe = 0; cframe < 1; cframe++) {
-    frame = cframe;
-    #if BISTRO
-    if(cframe < 48) {
-        camera.m_origin += cframe * Vec3(0.001, 0.0, 0.0);
-    }else{
-        camera.m_origin = camera.m_origin - cframe * Vec3(0.001, 0.0, 0.0);
-    }
-    #elif CITY
-    camera.m_origin += cframe * Vec3(0.001, 0.0005, 0.0);
-    #elif AIR_DROME
-    camera.m_origin += cframe * Vec3(-0.0001, 0.0, -0.0001);
-    #else
-    camera.m_origin += cframe * Vec3(0.001, 0.0, 0.0);
-    #endif
-    camera.updateTransformMatrix();
+        frame = cframe;
 
-    params.camera = camera;
-    resetFrameBuffers(buffers, width, height, params);//重置帧缓冲区
-    const int worldSpp = renderRequest.spp;
-    for (int sample = 0; sample < worldSpp; sample++) {
-        Timing timing;//统计程序运行时长
+        #ifdef LIGHT_MOVE
+        if(cframe == 0) {
+            for(int i = 0; i < 2; ++i) {
+                auto& light = lights[i];
 
-        runSample(
-            sample,
-            renderRequest.bounces,
-            optixStates,
-            sceneState,
-            buffers,
-            textures,
-            stream,
-            width,
-            height,
-            worldSpp,
-            params,
-            d_params,
-            outputImage,
-            textureImage,
-            timing,
-            worldRank,
-            worldSize,
-            exrFilename,
-            frame,
-            mpiBuffer,
-            comm_world,
-            aabbBuffer,
-            modules,
-            depth_modules,
-            device
-        );
-
-        std::cout << "   Sample timing:" << std::endl;
-        std::cout << "    Total: " << timing.getMilliseconds(TimedSection::Sample) << std::endl;
-
-    }
-
-    copyOutputBuffersForColor(buffers, width, height, params);
-    for (int row = 0; row < height; row++) {
-        for (int col = 0; col < width; col++) {
-            int pixelIndex = 3 * (row * width + col);
-            mpiBuffer.tempImage[pixelIndex] =     (buffers.output.directLightingBuffer[pixelIndex + 0] + buffers.output.envLightingBuffer[pixelIndex + 0]) / float(worldSpp);
-            mpiBuffer.tempImage[pixelIndex + 1] = (buffers.output.directLightingBuffer[pixelIndex + 1] + buffers.output.envLightingBuffer[pixelIndex + 1]) / float(worldSpp);
-            mpiBuffer.tempImage[pixelIndex + 2] = (buffers.output.directLightingBuffer[pixelIndex + 2] + buffers.output.envLightingBuffer[pixelIndex + 2]) / float(worldSpp);
+                light.m_p0 = light.m_p0 + Vec3(3.0, 0.0, 0.0);
+                light.m_p1 = light.m_p1 + Vec3(3.0, 0.0, 0.0);
+                light.m_p2 = light.m_p2 + Vec3(3.0, 0.0, 0.0);
+            }
         }
-    }
+        // Vec3 light_direction = Vec3(0.1*10.0, 0.0, 0.0);
+        Vec3 light_direction = Vec3(0.1, 0.0, 0.0);
+        for(int i = 0; i < 2; ++i) {
+            auto& light = lights[i];
 
-    MPI_Reduce(mpiBuffer.tempImage.data(), outputImage.data(), outputImage.size(), MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-    if (worldRank == 0) {
-        Image::save(//To Do:Need Adjust Saving Path
-            width,
-            height,
-            outputImage,
-            std::to_string(cframe ) + exrFilename
-        );}
-    }
+            light.m_p0 = light.m_p0 - light_direction;
+            light.m_p1 = light.m_p1 - light_direction;
+            light.m_p2 = light.m_p2 - light_direction;
+        }
+        CHECK_CUDA(cudaMemcpy(
+            reinterpret_cast<void *>(params.directLights),
+            lights.data(),
+            lightsSizeInBytes,
+            cudaMemcpyHostToDevice
+        ));
+        // if(cframe == 0) continue;
+        // if(cframe % 10 != 0) continue;
+        #endif
+
+        #ifdef CAMERA_MOVE
+        #if BISTRO
+        if(cframe < 48) {
+            camera.m_origin =  camera.m_origin + Vec3(0.03, 0.0, 0.0);
+        }else{
+            camera.m_origin = camera.m_origin - Vec3(0.03, 0.0, 0.0);
+        }
+        #elif CITY
+        camera.m_origin +=  Vec3(0.001, 0.0005, 0.0);
+        #elif AIR_DROME
+        camera.m_origin +=  Vec3(-0.0001, 0.0, -0.0001);
+        #else
+        camera.m_origin +=  normalized(camera.m_target - camera.m_origin);
+        #endif
+        camera.updateTransformMatrix();
+        #endif
+
+        camera.bucket_resolution.x = width / 8;
+        camera.bucket_resolution.y = height / 8;
+
+        params.camera = camera;
+        resetFrameBuffers(buffers, width, height, params);//重置帧缓冲区
+        const int worldSpp = renderRequest.spp;
+        for (int sample = 0; sample < worldSpp; sample++) {
+            Timing timing;//统计程序运行时长
+
+            runSample(
+                sample,
+                renderRequest.bounces,
+                optixStates,
+                sceneState,
+                buffers,
+                textures,
+                stream,
+                width,
+                height,
+                worldSpp,
+                params,
+                d_params,
+                outputImage,
+                textureImage,
+                timing,
+                worldRank,
+                worldSize,
+                exrFilename,
+                frame,
+                mpiBuffer,
+                comm_world,
+                aabbBuffer,
+                modules,
+                depth_modules,
+                device
+            );
+
+            std::cout << "   Sample timing:" << std::endl;
+            std::cout << "    Total: " << timing.getMilliseconds(TimedSection::Sample) << std::endl;
+            // std::cout << "    Textures: " << timing.getMilliseconds(TimedSection::PtexLookups) << std::endl;
+            // std::cout << "    Direct lighting: " << timing.getMilliseconds(TimedSection::DirectLighting) << std::endl;
+            // std::cout << "    Experiment: " << timing.getMilliseconds(TimedSection::Experiment) << std::endl;
+        }
+
+        copyOutputBuffersForColor(buffers, width, height, params);
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                int pixelIndex = 3 * (row * width + col);
+                mpiBuffer.tempImage[pixelIndex] =     (buffers.output.directLightingBuffer[pixelIndex + 0] + buffers.output.envLightingBuffer[pixelIndex + 0]) / float(worldSpp);
+                mpiBuffer.tempImage[pixelIndex + 1] = (buffers.output.directLightingBuffer[pixelIndex + 1] + buffers.output.envLightingBuffer[pixelIndex + 1]) / float(worldSpp);
+                mpiBuffer.tempImage[pixelIndex + 2] = (buffers.output.directLightingBuffer[pixelIndex + 2] + buffers.output.envLightingBuffer[pixelIndex + 2]) / float(worldSpp);
+
+                // mpiBuffer.tempImage[pixelIndex] =     (buffers.output.envLightingBuffer[pixelIndex + 0]) / float(worldSpp);
+                // mpiBuffer.tempImage[pixelIndex + 1] = (buffers.output.envLightingBuffer[pixelIndex + 1]) / float(worldSpp);
+                // mpiBuffer.tempImage[pixelIndex + 2] = (buffers.output.envLightingBuffer[pixelIndex + 2]) / float(worldSpp);
+            }
+        }
+
+        // Image::save(//To Do:Need Adjust Saving Path
+        //     width,
+        //     height,
+        //     mpiBuffer.tempImage,
+        //     "node" + std::to_string(worldRank) + exrFilename
+        // );
+
+        MPI_Reduce(mpiBuffer.tempImage.data(), outputImage.data(), outputImage.size(), MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+        if (worldRank == 0) {
+            Image::save(//To Do:Need Adjust Saving Path
+                width,
+                height,
+                outputImage,
+                std::to_string(cframe) + exrFilename
+            );}
+
+        }
+
+    // Image = mpiBuffer.tempImage;
+    // normalImage = mpiBuffer.normalImage;
+    // albedoImage = mpiBuffer.albedoImage;
+
+    // freeBuffers(sceneState.arena);
 
     CHECK_CUDA(cudaFree(reinterpret_cast<void *>(d_params)));
 }
